@@ -12,9 +12,18 @@ resource "azurerm_key_vault" "kv" {
   enabled_for_disk_encryption     = var.kv_enabled_for_disk_encryption
   enabled_for_template_deployment = var.kv_enabled_for_template_deployment
   public_network_access_enabled   = var.kv_public_network_access_enabled
-  enable_rbac_authorization       = false
+  enable_rbac_authorization       = true
 
    tags                = var.tags
+}
+
+resource "azurerm_role_assignment" "keyvault_secrets_app" {
+  scope                = azurerm_key_vault.kv.id
+
+  
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = var.kv_user_object_id
+  principal_type       = "ServicePrincipal" 
 }
 
 
@@ -27,13 +36,13 @@ resource "azurerm_key_vault" "kv" {
 # }
 
 
-resource "azurerm_key_vault_access_policy" "ado_pipeline" {
-  key_vault_id = azurerm_key_vault.kv.id
-  tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = var.kv_user_object_id # Must be a valid SPN object_id
+#resource "azurerm_key_vault_access_policy" "ado_pipeline" {
+#  key_vault_id = azurerm_key_vault.kv.id
+# tenant_id    = data.azurerm_client_config.current.tenant_id
+# object_id    = var.kv_user_object_id # Must be a valid SPN object_id
 
-  secret_permissions = ["Get", "List", "Set"]
-}
+#  secret_permissions = ["Get", "List", "Set"]
+#}
 
 
 # # Get current user/client info
