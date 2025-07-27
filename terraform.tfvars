@@ -25,7 +25,7 @@ kv_enabled_for_deployment          = true
 kv_enabled_for_disk_encryption     = true
 kv_enabled_for_template_deployment = true
 kv_public_network_access_enabled   = false
-kv_user_object_id                  = "b74654ea-e4e8-4603-9fe7-9b9a7c3b2ceb"  # Replace with your AAD object ID
+kv_user_object_id                  = "5e0b437b-9756-4d5f-8d23-a85bc81960dd"  # Replace with your AAD object ID
 
 # Storage Account
 account_tier              = "Standard"
