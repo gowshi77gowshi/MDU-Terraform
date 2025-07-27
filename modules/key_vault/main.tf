@@ -21,7 +21,7 @@ resource "azurerm_role_assignment" "keyvault_secrets_app" {
   scope                = azurerm_key_vault.kv.id
 
   
-  role_definition_name = "Key Vault Secrets User"
+  role_definition_name = "Key Vault Secrets Officer"
   principal_id         = var.kv_user_object_id
   principal_type       = "ServicePrincipal" 
 }
