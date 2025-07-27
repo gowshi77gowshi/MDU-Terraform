@@ -15,8 +15,8 @@ variables:
 steps:
 - task: AzureKeyVault@2
   inputs:
-    azureSubscription: 'terraform-azure-connection'
-    KeyVaultName: 'your-keyvault-name'
+    azureSubscription: 'mdu-conn'
+    KeyVaultName: 'kv-Mdu-dev-uksouth-001'
     SecretsFilter: '*'
     RunAsPreJob: true
 
