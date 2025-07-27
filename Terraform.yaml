@@ -12,109 +12,193 @@ variables:
   TF_STATE_FILE: "terraform.tfstate"
   TF_RESOURCE_GROUP: "rg-mdu-dev-001"
 
-stages:
-# ========================== PLAN STAGE ==========================
-- stage: Terraform_Plan
-  displayName: "Terraform Plan"
-  jobs:
-    - job: Plan
-      displayName: "Run Terraform Plan"
-      steps:
-        # 1. Fetch secrets from Key Vault
-        - task: AzureKeyVault@2
-          name: FetchSecrets
-          inputs:
-            azureSubscription: 'mdu-conn'
-            KeyVaultName: 'kv-Mdu-dev-uksouth-001'
-            SecretsFilter: '*'
-            RunAsPreJob: true
+steps:
+# Fetch secrets from Key Vault
+- task: AzureKeyVault@2
+  name: FetchSecrets
+  inputs:
+    azureSubscription: 'mdu-conn'
+    KeyVaultName: 'kv-Mdu-dev-uksouth-001'
+    SecretsFilter: '*'
+    RunAsPreJob: true
 
-        # 2. Install Terraform
-        - task: TerraformInstaller@1
-          inputs:
-            terraformVersion: '1.9.8'
+# # Build terraform.tfvars dynamically
+# - script: |
+#     echo "Building terraform.tfvars from Key Vault secrets..."
+#     rm -f terraform.tfvars
+#     for secret in $(compgen -A variable); do
+#       echo "$secret = \"${!secret}\"" >> terraform.tfvars
+#     done
+#     echo "Generated terraform.tfvars:"
+#     cat terraform.tfvars
+#   displayName: 'Generate terraform.tfvars from Key Vault'
+#   env:
+#     $(FetchSecrets.SECRET_VARIABLES)
 
-        # 3. Export all KeyVault secrets as TF_VAR_ env variables dynamically
-        - bash: |
-            echo "##[group]Exporting Key Vault secrets as TF_VAR_ variables"
-            for secret in $(compgen -A variable); do
-              if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* ]]; then
-                export TF_VAR_$secret=${!secret}
-                echo "Exported TF_VAR_$secret"
-              fi
-            done
-            echo "##[endgroup]"
-          displayName: "Map KeyVault secrets to TF_VAR_"
+# Build terraform.tfvars dynamically
+- bash: |
+    echo "Building terraform.tfvars from Key Vault secrets..."
+    rm -f terraform.tfvars
 
-        # 4. Terraform Init
-        - script: |
-            terraform init \
-              -backend-config="resource_group_name=$(TF_RESOURCE_GROUP)" \
-              -backend-config="storage_account_name=$(TF_STORAGE_ACCOUNT)" \
-              -backend-config="container_name=$(TF_CONTAINER_NAME)" \
-              -backend-config="key=$(TF_STATE_FILE)"
-          displayName: 'Terraform Init'
+    # Loop through all environment variables that were pulled from Key Vault
+    for var in $(printenv | awk -F= '{print $1}' | grep -v '^PATH$'); do
+      value=$(printenv $var)
+      echo "$var = \"$value\"" >> terraform.tfvars
+    done
 
-        # 5. Terraform Plan (output file to artifacts)
-        - script: terraform plan -out=tfplan
-          displayName: 'Terraform Plan'
-          env:
-            ARM_CLIENT_ID: $(servicePrincipalId)
-            ARM_CLIENT_SECRET: $(servicePrincipalKey)
-            ARM_SUBSCRIPTION_ID: $(subscriptionId)
-            ARM_TENANT_ID: $(tenantId)
-
-        # 6. Publish plan artifact
-        - publish: $(System.DefaultWorkingDirectory)/tfplan
-          artifact: terraform-plan
+    echo "Generated terraform.tfvars:"
+    cat terraform.tfvars
+  displayName: 'Generate terraform.tfvars from Key Vault'
 
 
-# ========================== APPLY STAGE ==========================
-- stage: Terraform_Apply
-  displayName: "Terraform Apply"
-  dependsOn: Terraform_Plan
-  condition: succeeded('Terraform_Plan')
-  jobs:
-    - deployment: Apply
-      displayName: "Run Terraform Apply"
-      environment: 'production'   # Creates an approval gate
-      strategy:
-        runOnce:
-          deploy:
-            steps:
-              # 1. Fetch KeyVault secrets again
-              - task: AzureKeyVault@2
-                inputs:
-                  azureSubscription: 'mdu-conn'
-                  KeyVaultName: 'kv-Mdu-dev-uksouth-001'
-                  SecretsFilter: '*'
+- task: TerraformInstaller@1
+  inputs:
+    terraformVersion: '1.9.8'
 
-              # 2. Install Terraform
-              - task: TerraformInstaller@1
-                inputs:
-                  terraformVersion: '1.9.8'
+- script: |
+    terraform init \
+      -backend-config="resource_group_name=$(TF_RESOURCE_GROUP)" \
+      -backend-config="storage_account_name=$(TF_STORAGE_ACCOUNT)" \
+      -backend-config="container_name=$(TF_CONTAINER_NAME)" \
+      -backend-config="key=$(TF_STATE_FILE)"
+  displayName: 'Terraform Init'
 
-              # 3. Download plan artifact
-              - download: current
-                artifact: terraform-plan
+- script: terraform plan -out=tfplan
+  displayName: 'Terraform Plan'
 
-              # 4. Export all KeyVault secrets as TF_VAR_ env variables dynamically
-              - bash: |
-                  for secret in $(compgen -A variable); do
-                    if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* ]]; then
-                      export TF_VAR_$secret=${!secret}
-                    fi
-                  done
-                displayName: "Map KeyVault secrets to TF_VAR_"
+- script: terraform apply -auto-approve tfplan
+  displayName: 'Terraform Apply'
 
-              # 5. Terraform Apply (auto-approve)
-              - script: terraform apply -auto-approve tfplan
-                displayName: 'Terraform Apply'
-                env:
-                  ARM_CLIENT_ID: $(servicePrincipalId)
-                  ARM_CLIENT_SECRET: $(servicePrincipalKey)
-                  ARM_SUBSCRIPTION_ID: $(subscriptionId)
-                  ARM_TENANT_ID: $(tenantId)
+
+
+
+
+
+
+
+
+
+
+
+
+
+# trigger:
+#   branches:
+#     include:
+#       - main
+
+# pool:
+#   vmImage: 'ubuntu-latest'
+
+# variables:
+#   TF_STORAGE_ACCOUNT: "storageaccountmdu001"
+#   TF_CONTAINER_NAME: "mdu-statefile"
+#   TF_STATE_FILE: "terraform.tfstate"
+#   TF_RESOURCE_GROUP: "rg-mdu-dev-001"
+
+# stages:
+# # ========================== PLAN STAGE ==========================
+# - stage: Terraform_Plan
+#   displayName: "Terraform Plan"
+#   jobs:
+#     - job: Plan
+#       displayName: "Run Terraform Plan"
+#       steps:
+#         # 1. Fetch secrets from Key Vault
+#         - task: AzureKeyVault@2
+#           name: FetchSecrets
+#           inputs:
+#             azureSubscription: 'mdu-conn'
+#             KeyVaultName: 'kv-Mdu-dev-uksouth-001'
+#             SecretsFilter: '*'
+#             RunAsPreJob: true
+
+#         # 2. Install Terraform
+#         - task: TerraformInstaller@1
+#           inputs:
+#             terraformVersion: '1.9.8'
+
+#         # 3. Export all KeyVault secrets as TF_VAR_ env variables dynamically
+#         - bash: |
+#             echo "##[group]Exporting Key Vault secrets as TF_VAR_ variables"
+#             for secret in $(compgen -A variable); do
+#               if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* ]]; then
+#                 export TF_VAR_$secret=${!secret}
+#                 echo "Exported TF_VAR_$secret"
+#               fi
+#             done
+#             echo "##[endgroup]"
+#           displayName: "Map KeyVault secrets to TF_VAR_"
+
+#         # 4. Terraform Init
+#         - script: |
+#             terraform init \
+#               -backend-config="resource_group_name=$(TF_RESOURCE_GROUP)" \
+#               -backend-config="storage_account_name=$(TF_STORAGE_ACCOUNT)" \
+#               -backend-config="container_name=$(TF_CONTAINER_NAME)" \
+#               -backend-config="key=$(TF_STATE_FILE)"
+#           displayName: 'Terraform Init'
+
+#         # 5. Terraform Plan (output file to artifacts)
+#         - script: terraform plan -out=tfplan
+#           displayName: 'Terraform Plan'
+#           env:
+#             ARM_CLIENT_ID: $(servicePrincipalId)
+#             ARM_CLIENT_SECRET: $(servicePrincipalKey)
+#             ARM_SUBSCRIPTION_ID: $(subscriptionId)
+#             ARM_TENANT_ID: $(tenantId)
+
+#         # 6. Publish plan artifact
+#         - publish: $(System.DefaultWorkingDirectory)/tfplan
+#           artifact: terraform-plan
+
+
+# # ========================== APPLY STAGE ==========================
+# - stage: Terraform_Apply
+#   displayName: "Terraform Apply"
+#   dependsOn: Terraform_Plan
+#   condition: succeeded('Terraform_Plan')
+#   jobs:
+#     - deployment: Apply
+#       displayName: "Run Terraform Apply"
+#       environment: 'production'   # Creates an approval gate
+#       strategy:
+#         runOnce:
+#           deploy:
+#             steps:
+#               # 1. Fetch KeyVault secrets again
+#               - task: AzureKeyVault@2
+#                 inputs:
+#                   azureSubscription: 'mdu-conn'
+#                   KeyVaultName: 'kv-Mdu-dev-uksouth-001'
+#                   SecretsFilter: '*'
+
+#               # 2. Install Terraform
+#               - task: TerraformInstaller@1
+#                 inputs:
+#                   terraformVersion: '1.9.8'
+
+#               # 3. Download plan artifact
+#               - download: current
+#                 artifact: terraform-plan
+
+#               # 4. Export all KeyVault secrets as TF_VAR_ env variables dynamically
+#               - bash: |
+#                   for secret in $(compgen -A variable); do
+#                     if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* ]]; then
+#                       export TF_VAR_$secret=${!secret}
+#                     fi
+#                   done
+#                 displayName: "Map KeyVault secrets to TF_VAR_"
+
+#               # 5. Terraform Apply (auto-approve)
+#               - script: terraform apply -auto-approve tfplan
+#                 displayName: 'Terraform Apply'
+#                 env:
+#                   ARM_CLIENT_ID: $(servicePrincipalId)
+#                   ARM_CLIENT_SECRET: $(servicePrincipalKey)
+#                   ARM_SUBSCRIPTION_ID: $(subscriptionId)
+#                   ARM_TENANT_ID: $(tenantId)
 
 
 
