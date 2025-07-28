@@ -1,7 +1,27 @@
-trigger:
+trigger: 
   branches:
     include:
       - main
+
+# ========================== PARAMETERS ==========================
+parameters:
+  - name: environment
+    displayName: "Deployment Environment"
+    type: string
+    default: "dev"
+    values:
+      - dev
+      - stg
+      - prod
+
+  - name: location
+    displayName: "Azure Region"
+    type: string
+    default: "uksouth"
+    values:
+      - uksouth
+      - eastus
+      - westeurope
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -12,41 +32,43 @@ variables:
   TF_STATE_FILE: "terraform.tfstate"
   TF_RESOURCE_GROUP: "rg-mdu-dev-001"
 
-# ========================== PLAN STAGE ==========================
 stages:
+# ========================== PLAN (Build) ==========================
 - stage: Terraform_Plan
-  displayName: "Terraform Plan"
+  displayName: "Terraform Init & Plan"
   jobs:
     - job: Plan
-      displayName: "Run Terraform Plan"
       steps:
-        # 1. Pull all secrets from Key Vault
+        # 1. Fetch secrets from Key Vault
         - task: AzureKeyVault@2
           name: FetchSecrets
           inputs:
             azureSubscription: 'mdu-conn'
-            KeyVaultName: 'kv-Mdu-dev-uksouth-001'
+            KeyVaultName: 'kv-Mdu-${{ parameters.environment }}-${{ parameters.location }}-001'
             SecretsFilter: '*'
             RunAsPreJob: true
 
-        # 2. Install Terraform
-        - task: TerraformInstaller@1
-          inputs:
-            terraformVersion: '1.9.8'
-
-        # 3. Map Key Vault secrets to Terraform variables (underscore fix)
+        # 2. Map secrets to TF_VAR_
         - bash: |
-            echo "##[group]Exporting Key Vault secrets as TF_VAR_ variables"
+            echo "##[group]Mapping Key Vault secrets"
             for secret in $(compgen -A variable); do
-              # Ignore system variables
-              if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* && $secret != AGENT_* ]]; then
-                fixed_name=$(echo $secret | tr '-' '_') # replace hyphens with underscores
+              if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* ]]; then
+                fixed_name=$(echo $secret | tr '-' '_')
                 export TF_VAR_${fixed_name}=${!secret}
-                echo "Mapped Key Vault secret $secret -> TF_VAR_${fixed_name}"
+                echo "Mapped secret $secret -> TF_VAR_${fixed_name}"
               fi
             done
             echo "##[endgroup]"
-          displayName: "Map KeyVault secrets to TF_VAR_"
+
+            # Set pipeline parameters as TF_VAR_ for Terraform
+            echo "##vso[task.setvariable variable=TF_VAR_environment]${{ parameters.environment }}"
+            echo "##vso[task.setvariable variable=TF_VAR_location]${{ parameters.location }}"
+          displayName: "Map Key Vault secrets & parameters"
+
+        # 3. Install Terraform
+        - task: TerraformInstaller@1
+          inputs:
+            terraformVersion: '1.9.8'
 
         # 4. Terraform Init
         - script: |
@@ -57,61 +79,226 @@ stages:
               -backend-config="key=$(TF_STATE_FILE)"
           displayName: 'Terraform Init'
 
-        # 5. Terraform Plan (save output as artifact)
+        # 5. Terraform Plan
         - script: terraform plan -out=tfplan
           displayName: 'Terraform Plan'
+          env:
+            TF_VAR_environment: ${{ parameters.environment }}
+            TF_VAR_location: ${{ parameters.location }}
 
+        # 6. Publish plan
         - publish: $(System.DefaultWorkingDirectory)/tfplan
           artifact: terraform-plan
 
-
-# ========================== APPLY & DESTROY STAGE ==========================
-- stage: Terraform_Release
-  displayName: "Terraform Apply & Destroy"
+# ========================== APPLY (Release) ==========================
+- stage: Terraform_Apply
+  displayName: "Terraform Apply"
   dependsOn: Terraform_Plan
   condition: succeeded('Terraform_Plan')
   jobs:
-    - deployment: Release
-      displayName: "Terraform Apply & Destroy"
-      environment: 'production'   # Creates approval gate
+    - deployment: Apply
+      environment: 'production'    # Approval gate
       strategy:
         runOnce:
           deploy:
             steps:
-              # 1. Fetch KeyVault secrets again
               - task: AzureKeyVault@2
                 inputs:
                   azureSubscription: 'mdu-conn'
-                  KeyVaultName: 'kv-Mdu-dev-uksouth-001'
+                  KeyVaultName: 'kv-Mdu-${{ parameters.environment }}-${{ parameters.location }}-001'
                   SecretsFilter: '*'
 
-              # 2. Install Terraform
+              - bash: |
+                  for secret in $(compgen -A variable); do
+                    fixed_name=$(echo $secret | tr '-' '_')
+                    export TF_VAR_${fixed_name}=${!secret}
+                  done
+                displayName: "Map Key Vault secrets"
+
               - task: TerraformInstaller@1
                 inputs:
                   terraformVersion: '1.9.8'
 
-              # 3. Map KeyVault secrets back to TF_VAR_
-              - bash: |
-                  for secret in $(compgen -A variable); do
-                    if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* && $secret != AGENT_* ]]; then
-                      fixed_name=$(echo $secret | tr '-' '_')
-                      export TF_VAR_${fixed_name}=${!secret}
-                    fi
-                  done
-                displayName: "Map KeyVault secrets to TF_VAR_"
-
-              # 4. Download plan artifact
               - download: current
                 artifact: terraform-plan
 
-              # 5. Terraform Apply
               - script: terraform apply -auto-approve tfplan
                 displayName: 'Terraform Apply'
+                env:
+                  TF_VAR_environment: ${{ parameters.environment }}
+                  TF_VAR_location: ${{ parameters.location }}
 
-              # 6. Terraform Destroy (manual control)
+# ========================== DESTROY (Optional Release) ==========================
+- stage: Terraform_Destroy
+  displayName: "Terraform Destroy"
+  dependsOn: Terraform_Apply
+  condition: succeeded('Terraform_Apply')
+  jobs:
+    - deployment: Destroy
+      environment: 'production'   # Approval gate again
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - task: AzureKeyVault@2
+                inputs:
+                  azureSubscription: 'mdu-conn'
+                  KeyVaultName: 'kv-Mdu-${{ parameters.environment }}-${{ parameters.location }}-001'
+                  SecretsFilter: '*'
+
+              - bash: |
+                  for secret in $(compgen -A variable); do
+                    fixed_name=$(echo $secret | tr '-' '_')
+                    export TF_VAR_${fixed_name}=${!secret}
+                  done
+
+              - task: TerraformInstaller@1
+                inputs:
+                  terraformVersion: '1.9.8'
+
               - script: terraform destroy -auto-approve
                 displayName: 'Terraform Destroy'
-                condition: and(succeeded(), eq(variables['DestroyResources'], 'true'))
+                env:
+                  TF_VAR_environment: ${{ parameters.environment }}
+                  TF_VAR_location: ${{ parameters.location }}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# trigger:
+#   branches:
+#     include:
+#       - main
+
+# pool:
+#   vmImage: 'ubuntu-latest'
+
+# variables:
+#   TF_STORAGE_ACCOUNT: "storageaccountmdu001"
+#   TF_CONTAINER_NAME: "mdu-statefile"
+#   TF_STATE_FILE: "terraform.tfstate"
+#   TF_RESOURCE_GROUP: "rg-mdu-dev-001"
+
+# # ========================== PLAN STAGE ==========================
+# stages:
+# - stage: Terraform_Plan
+#   displayName: "Terraform Plan"
+#   jobs:
+#     - job: Plan
+#       displayName: "Run Terraform Plan"
+#       steps:
+#         # 1. Pull all secrets from Key Vault
+#         - task: AzureKeyVault@2
+#           name: FetchSecrets
+#           inputs:
+#             azureSubscription: 'mdu-conn'
+#             KeyVaultName: 'kv-Mdu-dev-uksouth-001'
+#             SecretsFilter: '*'
+#             RunAsPreJob: true
+
+#         # 2. Install Terraform
+#         - task: TerraformInstaller@1
+#           inputs:
+#             terraformVersion: '1.9.8'
+
+#         # 3. Map Key Vault secrets to Terraform variables (underscore fix)
+#         - bash: |
+#             echo "##[group]Exporting Key Vault secrets as TF_VAR_ variables"
+#             for secret in $(compgen -A variable); do
+#               # Ignore system variables
+#               if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* && $secret != AGENT_* ]]; then
+#                 fixed_name=$(echo $secret | tr '-' '_') # replace hyphens with underscores
+#                 export TF_VAR_${fixed_name}=${!secret}
+#                 echo "Mapped Key Vault secret $secret -> TF_VAR_${fixed_name}"
+#               fi
+#             done
+#             echo "##[endgroup]"
+#           displayName: "Map KeyVault secrets to TF_VAR_"
+
+#         # 4. Terraform Init
+#         - script: |
+#             terraform init \
+#               -backend-config="resource_group_name=$(TF_RESOURCE_GROUP)" \
+#               -backend-config="storage_account_name=$(TF_STORAGE_ACCOUNT)" \
+#               -backend-config="container_name=$(TF_CONTAINER_NAME)" \
+#               -backend-config="key=$(TF_STATE_FILE)"
+#           displayName: 'Terraform Init'
+
+#         # 5. Terraform Plan (save output as artifact)
+#         - script: terraform plan -out=tfplan
+#           displayName: 'Terraform Plan'
+
+#         - publish: $(System.DefaultWorkingDirectory)/tfplan
+#           artifact: terraform-plan
+
+
+# # ========================== APPLY & DESTROY STAGE ==========================
+# - stage: Terraform_Release
+#   displayName: "Terraform Apply & Destroy"
+#   dependsOn: Terraform_Plan
+#   condition: succeeded('Terraform_Plan')
+#   jobs:
+#     - deployment: Release
+#       displayName: "Terraform Apply & Destroy"
+#       environment: 'production'   # Creates approval gate
+#       strategy:
+#         runOnce:
+#           deploy:
+#             steps:
+#               # 1. Fetch KeyVault secrets again
+#               - task: AzureKeyVault@2
+#                 inputs:
+#                   azureSubscription: 'mdu-conn'
+#                   KeyVaultName: 'kv-Mdu-dev-uksouth-001'
+#                   SecretsFilter: '*'
+
+#               # 2. Install Terraform
+#               - task: TerraformInstaller@1
+#                 inputs:
+#                   terraformVersion: '1.9.8'
+
+#               # 3. Map KeyVault secrets back to TF_VAR_
+#               - bash: |
+#                   for secret in $(compgen -A variable); do
+#                     if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* && $secret != AGENT_* ]]; then
+#                       fixed_name=$(echo $secret | tr '-' '_')
+#                       export TF_VAR_${fixed_name}=${!secret}
+#                     fi
+#                   done
+#                 displayName: "Map KeyVault secrets to TF_VAR_"
+
+#               # 4. Download plan artifact
+#               - download: current
+#                 artifact: terraform-plan
+
+#               # 5. Terraform Apply
+#               - script: terraform apply -auto-approve tfplan
+#                 displayName: 'Terraform Apply'
+
+#               # 6. Terraform Destroy (manual control)
+#               - script: terraform destroy -auto-approve
+#                 displayName: 'Terraform Destroy'
+#                 condition: and(succeeded(), eq(variables['DestroyResources'], 'true'))
 
 
 
