@@ -40,8 +40,9 @@ stages:
   jobs:
     - job: Plan
       steps:
-        # Install Terraform CLI
         - checkout: self
+
+        # Install Terraform CLI
         - task: TerraformInstaller@1
           displayName: "Install Terraform CLI"
           inputs:
@@ -59,7 +60,7 @@ stages:
             backendAzureRmContainerName: 'mdu-statefile'
             backendAzureRmKey: 'terraform.tfstate'
 
-        # Validate Terraform configuration syntax
+        # Validate Terraform configuration
         - task: TerraformTaskV4@4
           displayName: "Terraform Validate"
           inputs:
@@ -78,7 +79,7 @@ stages:
               -out=tfplan
             environmentServiceNameAzureRM: 'mdu-conn'
 
-        # Publish the plan file as artifact for next stage
+        # Publish plan artifact for Apply stage
         - publish: $(System.DefaultWorkingDirectory)/tfplan
           artifact: terraform-plan
           displayName: "Publish Terraform Plan Artifact"
@@ -90,25 +91,37 @@ stages:
   condition: succeeded('Terraform_CI')
   jobs:
     - deployment: Apply
-      # Environment enforces manual approval (Dev, Stg, Prod configured in Azure DevOps)
-      environment: ${{ parameters.environment }}
+      environment: ${{ parameters.environment }} # manual approvals via Environment
       strategy:
         runOnce:
           deploy:
             steps:
               - checkout: self
-              # Download the approved plan from previous stage
+
+              # Download plan artifact
               - download: current
                 artifact: terraform-plan
                 displayName: "Download Terraform Plan"
 
-              # Install Terraform (needed for apply)
+              # Install Terraform
               - task: TerraformInstaller@1
                 displayName: "Install Terraform CLI"
                 inputs:
                   terraformVersion: 'latest'
 
-              # Apply the plan (use only tfplan, do not re-run variables)
+              # Re-run Terraform Init (modules & providers download)
+              - task: TerraformTaskV4@4
+                displayName: "Terraform Init"
+                inputs:
+                  provider: 'azurerm'
+                  command: 'init'
+                  backendServiceArm: 'mdu-conn'
+                  backendAzureRmResourceGroupName: 'rg-mdu-dev-001'
+                  backendAzureRmStorageAccountName: 'storageaccountmdu001'
+                  backendAzureRmContainerName: 'mdu-statefile'
+                  backendAzureRmKey: 'terraform.tfstate'
+
+              # Apply using the saved tfplan
               - task: TerraformTaskV4@4
                 displayName: "Terraform Apply"
                 inputs:
@@ -124,19 +137,32 @@ stages:
   condition: succeeded('Terraform_Apply')
   jobs:
     - deployment: Destroy
-      # Environment again enforces approvals
-      environment: ${{ parameters.environment }}
+      environment: ${{ parameters.environment }} # manual approvals again
       strategy:
         runOnce:
           deploy:
             steps:
-              # Install Terraform for destroy
+              - checkout: self
+
+              # Install Terraform
               - task: TerraformInstaller@1
                 displayName: "Install Terraform CLI"
                 inputs:
                   terraformVersion: 'latest'
 
-              # Destroy resources with variables and auto-approve
+              # Re-run Terraform Init
+              - task: TerraformTaskV4@4
+                displayName: "Terraform Init"
+                inputs:
+                  provider: 'azurerm'
+                  command: 'init'
+                  backendServiceArm: 'mdu-conn'
+                  backendAzureRmResourceGroupName: 'rg-mdu-dev-001'
+                  backendAzureRmStorageAccountName: 'storageaccountmdu001'
+                  backendAzureRmContainerName: 'mdu-statefile'
+                  backendAzureRmKey: 'terraform.tfstate'
+
+              # Destroy resources
               - task: TerraformTaskV4@4
                 displayName: "Terraform Destroy"
                 inputs:
@@ -147,6 +173,179 @@ stages:
                     -var "location=${{ parameters.location }}"
                     -auto-approve
                   environmentServiceNameAzureRM: 'mdu-conn'
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# trigger:
+#   branches:
+#     include:
+#       - main
+
+# # ========================== PARAMETERS ==========================
+# parameters:
+#   - name: environment
+#     displayName: "Deployment Environment"
+#     type: string
+#     default: "dev"
+#     values:
+#       - dev
+#       - stg
+#       - prod
+
+#   - name: location
+#     displayName: "Azure Region"
+#     type: string
+#     default: "uksouth"
+#     values:
+#       - uksouth
+#       - eastus
+#       - westeurope
+
+# pool:
+#   vmImage: 'ubuntu-latest'
+
+# variables:
+#   TF_STORAGE_ACCOUNT: "storageaccountmdu001"
+#   TF_CONTAINER_NAME: "mdu-statefile"
+#   TF_STATE_FILE: "terraform.tfstate"
+#   TF_RESOURCE_GROUP: "rg-mdu-dev-001"
+
+# stages:
+
+# # ========================== INIT + VALIDATE + PLAN ==========================
+# - stage: Terraform_CI
+#   displayName: "Terraform Init, Validate & Plan"
+#   jobs:
+#     - job: Plan
+#       steps:
+#         # Install Terraform CLI
+#         - checkout: self
+#         - task: TerraformInstaller@1
+#           displayName: "Install Terraform CLI"
+#           inputs:
+#             terraformVersion: 'latest'
+
+#         # Initialize Terraform backend using Azure Storage
+#         - task: TerraformTaskV4@4
+#           displayName: "Terraform Init"
+#           inputs:
+#             provider: 'azurerm'
+#             command: 'init'
+#             backendServiceArm: 'mdu-conn'
+#             backendAzureRmResourceGroupName: 'rg-mdu-dev-001'
+#             backendAzureRmStorageAccountName: 'storageaccountmdu001'
+#             backendAzureRmContainerName: 'mdu-statefile'
+#             backendAzureRmKey: 'terraform.tfstate'
+
+#         # Validate Terraform configuration syntax
+#         - task: TerraformTaskV4@4
+#           displayName: "Terraform Validate"
+#           inputs:
+#             provider: 'azurerm'
+#             command: 'validate'
+
+#         # Run Terraform Plan and save plan file
+#         - task: TerraformTaskV4@4
+#           displayName: "Terraform Plan"
+#           inputs:
+#             provider: 'azurerm'
+#             command: 'plan'
+#             commandOptions: >
+#               -var "environment=${{ parameters.environment }}"
+#               -var "location=${{ parameters.location }}"
+#               -out=tfplan
+#             environmentServiceNameAzureRM: 'mdu-conn'
+
+#         # Publish the plan file as artifact for next stage
+#         - publish: $(System.DefaultWorkingDirectory)/tfplan
+#           artifact: terraform-plan
+#           displayName: "Publish Terraform Plan Artifact"
+
+# # ========================== APPLY (with Approval) ==========================
+# - stage: Terraform_Apply
+#   displayName: "Terraform Apply"
+#   dependsOn: Terraform_CI
+#   condition: succeeded('Terraform_CI')
+#   jobs:
+#     - deployment: Apply
+#       # Environment enforces manual approval (Dev, Stg, Prod configured in Azure DevOps)
+#       environment: ${{ parameters.environment }}
+#       strategy:
+#         runOnce:
+#           deploy:
+#             steps:
+#               - checkout: self
+#               # Download the approved plan from previous stage
+#               - download: current
+#                 artifact: terraform-plan
+#                 displayName: "Download Terraform Plan"
+
+#               # Install Terraform (needed for apply)
+#               - task: TerraformInstaller@1
+#                 displayName: "Install Terraform CLI"
+#                 inputs:
+#                   terraformVersion: 'latest'
+
+#               # Apply the plan (use only tfplan, do not re-run variables)
+#               - task: TerraformTaskV4@4
+#                 displayName: "Terraform Apply"
+#                 inputs:
+#                   provider: 'azurerm'
+#                   command: 'apply'
+#                   commandOptions: '-auto-approve $(Pipeline.Workspace)/terraform-plan/tfplan'
+#                   environmentServiceNameAzureRM: 'mdu-conn'
+
+# # ========================== DESTROY (with Approval) ==========================
+# - stage: Terraform_Destroy
+#   displayName: "Terraform Destroy"
+#   dependsOn: Terraform_Apply
+#   condition: succeeded('Terraform_Apply')
+#   jobs:
+#     - deployment: Destroy
+#       # Environment again enforces approvals
+#       environment: ${{ parameters.environment }}
+#       strategy:
+#         runOnce:
+#           deploy:
+#             steps:
+#               # Install Terraform for destroy
+#               - task: TerraformInstaller@1
+#                 displayName: "Install Terraform CLI"
+#                 inputs:
+#                   terraformVersion: 'latest'
+
+#               # Destroy resources with variables and auto-approve
+#               - task: TerraformTaskV4@4
+#                 displayName: "Terraform Destroy"
+#                 inputs:
+#                   provider: 'azurerm'
+#                   command: 'destroy'
+#                   commandOptions: >
+#                     -var "environment=${{ parameters.environment }}"
+#                     -var "location=${{ parameters.location }}"
+#                     -auto-approve
+#                   environmentServiceNameAzureRM: 'mdu-conn'
 
 
 
