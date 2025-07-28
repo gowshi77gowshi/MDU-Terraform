@@ -15,6 +15,11 @@ resource "azurerm_key_vault" "kv" {
   enable_rbac_authorization       = true
 
    tags                = var.tags
+    lifecycle {
+    prevent_destroy = true
+  }
+
+
 }
 
 resource "azurerm_role_assignment" "keyvault_secrets_app" {
