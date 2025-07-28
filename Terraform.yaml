@@ -33,6 +33,7 @@ variables:
   TF_RESOURCE_GROUP: "rg-mdu-dev-001"
 
 stages:
+
 # ========================== PLAN (Build) ==========================
 - stage: Terraform_Plan
   displayName: "Terraform Init & Plan"
@@ -47,11 +48,10 @@ stages:
             scriptType: 'bash'
             scriptLocation: 'inlineScript'
             inlineScript: |
-              echo "Setting ARM_* env variables for Terraform"
-              echo "##vso[task.setvariable variable=ARM_CLIENT_ID]$servicePrincipalId"
-              echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET]$servicePrincipalKey"
-              echo "##vso[task.setvariable variable=ARM_TENANT_ID]$tenantId"
-              echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID]$subscriptionId"
+              echo "##vso[task.setvariable variable=ARM_CLIENT_ID;issecret=true]$servicePrincipalId"
+              echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET;issecret=true]$servicePrincipalKey"
+              echo "##vso[task.setvariable variable=ARM_TENANT_ID;issecret=true]$tenantId"
+              echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID;issecret=true]$subscriptionId"
 
         # 2. Fetch secrets from Key Vault
         - task: AzureKeyVault@2
@@ -62,7 +62,7 @@ stages:
             SecretsFilter: '*'
             RunAsPreJob: true
 
-        # 3. Map secrets to TF_VAR_
+        # 3. Map secrets to TF_VAR_*
         - bash: |
             echo "##[group]Mapping Key Vault secrets"
             for secret in $(compgen -A variable); do
@@ -82,34 +82,34 @@ stages:
           inputs:
             terraformVersion: '1.9.8'
 
-        # 5. Terraform Init
+        # 5. Terraform Init (now exporting ARM_* inside the step)
         - script: |
+            export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+            export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+            export ARM_TENANT_ID=$(ARM_TENANT_ID)
+            export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+
             terraform init \
               -backend-config="resource_group_name=$(TF_RESOURCE_GROUP)" \
               -backend-config="storage_account_name=$(TF_STORAGE_ACCOUNT)" \
               -backend-config="container_name=$(TF_CONTAINER_NAME)" \
               -backend-config="key=$(TF_STATE_FILE)"
           displayName: 'Terraform Init'
-          env:
-            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-            ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
-            ARM_TENANT_ID: $(ARM_TENANT_ID)
-            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
 
         # 6. Terraform Plan
-        - script: terraform plan -out=tfplan
+        - script: |
+            export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+            export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+            export ARM_TENANT_ID=$(ARM_TENANT_ID)
+            export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+
+            terraform plan -out=tfplan
           displayName: 'Terraform Plan'
-          env:
-            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-            ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
-            ARM_TENANT_ID: $(ARM_TENANT_ID)
-            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
-            TF_VAR_environment: ${{ parameters.environment }}
-            TF_VAR_location: ${{ parameters.location }}
 
         # 7. Publish plan
         - publish: $(System.DefaultWorkingDirectory)/tfplan
           artifact: terraform-plan
+
 
 # ========================== APPLY (Release) ==========================
 - stage: Terraform_Apply
@@ -130,11 +130,10 @@ stages:
                   scriptType: 'bash'
                   scriptLocation: 'inlineScript'
                   inlineScript: |
-                    echo "Setting ARM_* env variables for Terraform"
-                    echo "##vso[task.setvariable variable=ARM_CLIENT_ID]$servicePrincipalId"
-                    echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET]$servicePrincipalKey"
-                    echo "##vso[task.setvariable variable=ARM_TENANT_ID]$tenantId"
-                    echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID]$subscriptionId"
+                    echo "##vso[task.setvariable variable=ARM_CLIENT_ID;issecret=true]$servicePrincipalId"
+                    echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET;issecret=true]$servicePrincipalKey"
+                    echo "##vso[task.setvariable variable=ARM_TENANT_ID;issecret=true]$tenantId"
+                    echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID;issecret=true]$subscriptionId"
 
               - task: AzureKeyVault@2
                 inputs:
@@ -156,15 +155,15 @@ stages:
               - download: current
                 artifact: terraform-plan
 
-              - script: terraform apply -auto-approve tfplan
+              - script: |
+                  export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                  export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                  export ARM_TENANT_ID=$(ARM_TENANT_ID)
+                  export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+
+                  terraform apply -auto-approve tfplan
                 displayName: 'Terraform Apply'
-                env:
-                  ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-                  ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
-                  ARM_TENANT_ID: $(ARM_TENANT_ID)
-                  ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
-                  TF_VAR_environment: ${{ parameters.environment }}
-                  TF_VAR_location: ${{ parameters.location }}
+
 
 # ========================== DESTROY (Optional Release) ==========================
 - stage: Terraform_Destroy
@@ -185,11 +184,10 @@ stages:
                   scriptType: 'bash'
                   scriptLocation: 'inlineScript'
                   inlineScript: |
-                    echo "Setting ARM_* env variables for Terraform"
-                    echo "##vso[task.setvariable variable=ARM_CLIENT_ID]$servicePrincipalId"
-                    echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET]$servicePrincipalKey"
-                    echo "##vso[task.setvariable variable=ARM_TENANT_ID]$tenantId"
-                    echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID]$subscriptionId"
+                    echo "##vso[task.setvariable variable=ARM_CLIENT_ID;issecret=true]$servicePrincipalId"
+                    echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET;issecret=true]$servicePrincipalKey"
+                    echo "##vso[task.setvariable variable=ARM_TENANT_ID;issecret=true]$tenantId"
+                    echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID;issecret=true]$subscriptionId"
 
               - task: AzureKeyVault@2
                 inputs:
@@ -207,15 +205,251 @@ stages:
                 inputs:
                   terraformVersion: '1.9.8'
 
-              - script: terraform destroy -auto-approve
+              - script: |
+                  export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                  export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                  export ARM_TENANT_ID=$(ARM_TENANT_ID)
+                  export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+
+                  terraform destroy -auto-approve
                 displayName: 'Terraform Destroy'
-                env:
-                  ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-                  ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
-                  ARM_TENANT_ID: $(ARM_TENANT_ID)
-                  ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
-                  TF_VAR_environment: ${{ parameters.environment }}
-                  TF_VAR_location: ${{ parameters.location }}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# trigger:
+#   branches:
+#     include:
+#       - main
+
+# # ========================== PARAMETERS ==========================
+# parameters:
+#   - name: environment
+#     displayName: "Deployment Environment"
+#     type: string
+#     default: "dev"
+#     values:
+#       - dev
+#       - stg
+#       - prod
+
+#   - name: location
+#     displayName: "Azure Region"
+#     type: string
+#     default: "uksouth"
+#     values:
+#       - uksouth
+#       - eastus
+#       - westeurope
+
+# pool:
+#   vmImage: 'ubuntu-latest'
+
+# variables:
+#   TF_STORAGE_ACCOUNT: "storageaccountmdu001"
+#   TF_CONTAINER_NAME: "mdu-statefile"
+#   TF_STATE_FILE: "terraform.tfstate"
+#   TF_RESOURCE_GROUP: "rg-mdu-dev-001"
+
+# stages:
+# # ========================== PLAN (Build) ==========================
+# - stage: Terraform_Plan
+#   displayName: "Terraform Init & Plan"
+#   jobs:
+#     - job: Plan
+#       steps:
+#         # 1. Azure CLI login and set ARM_* env vars
+#         - task: AzureCLI@2
+#           displayName: "Azure CLI Login (SP Auth)"
+#           inputs:
+#             azureSubscription: 'mdu-conn'
+#             scriptType: 'bash'
+#             scriptLocation: 'inlineScript'
+#             inlineScript: |
+#               echo "Setting ARM_* env variables for Terraform"
+#               echo "##vso[task.setvariable variable=ARM_CLIENT_ID]$servicePrincipalId"
+#               echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET]$servicePrincipalKey"
+#               echo "##vso[task.setvariable variable=ARM_TENANT_ID]$tenantId"
+#               echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID]$subscriptionId"
+
+#         # 2. Fetch secrets from Key Vault
+#         - task: AzureKeyVault@2
+#           name: FetchSecrets
+#           inputs:
+#             azureSubscription: 'mdu-conn'
+#             KeyVaultName: 'kv-Mdu-${{ parameters.environment }}-${{ parameters.location }}-001'
+#             SecretsFilter: '*'
+#             RunAsPreJob: true
+
+#         # 3. Map secrets to TF_VAR_
+#         - bash: |
+#             echo "##[group]Mapping Key Vault secrets"
+#             for secret in $(compgen -A variable); do
+#               if [[ $secret != TF_* && $secret != BUILD_* && $secret != SYSTEM_* ]]; then
+#                 fixed_name=$(echo $secret | tr '-' '_')
+#                 export TF_VAR_${fixed_name}=${!secret}
+#                 echo "Mapped secret $secret -> TF_VAR_${fixed_name}"
+#               fi
+#             done
+#             echo "##[endgroup]"
+#             echo "##vso[task.setvariable variable=TF_VAR_environment]${{ parameters.environment }}"
+#             echo "##vso[task.setvariable variable=TF_VAR_location]${{ parameters.location }}"
+#           displayName: "Map Key Vault secrets & parameters"
+
+#         # 4. Install Terraform
+#         - task: TerraformInstaller@1
+#           inputs:
+#             terraformVersion: '1.9.8'
+
+#         # 5. Terraform Init
+#         - script: |
+#             terraform init \
+#               -backend-config="resource_group_name=$(TF_RESOURCE_GROUP)" \
+#               -backend-config="storage_account_name=$(TF_STORAGE_ACCOUNT)" \
+#               -backend-config="container_name=$(TF_CONTAINER_NAME)" \
+#               -backend-config="key=$(TF_STATE_FILE)"
+#           displayName: 'Terraform Init'
+#           env:
+#             ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+#             ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+#             ARM_TENANT_ID: $(ARM_TENANT_ID)
+#             ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+
+#         # 6. Terraform Plan
+#         - script: terraform plan -out=tfplan
+#           displayName: 'Terraform Plan'
+#           env:
+#             ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+#             ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+#             ARM_TENANT_ID: $(ARM_TENANT_ID)
+#             ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+#             TF_VAR_environment: ${{ parameters.environment }}
+#             TF_VAR_location: ${{ parameters.location }}
+
+#         # 7. Publish plan
+#         - publish: $(System.DefaultWorkingDirectory)/tfplan
+#           artifact: terraform-plan
+
+# # ========================== APPLY (Release) ==========================
+# - stage: Terraform_Apply
+#   displayName: "Terraform Apply"
+#   dependsOn: Terraform_Plan
+#   condition: succeeded('Terraform_Plan')
+#   jobs:
+#     - deployment: Apply
+#       environment: 'production'
+#       strategy:
+#         runOnce:
+#           deploy:
+#             steps:
+#               - task: AzureCLI@2
+#                 displayName: "Azure CLI Login (SP Auth)"
+#                 inputs:
+#                   azureSubscription: 'mdu-conn'
+#                   scriptType: 'bash'
+#                   scriptLocation: 'inlineScript'
+#                   inlineScript: |
+#                     echo "Setting ARM_* env variables for Terraform"
+#                     echo "##vso[task.setvariable variable=ARM_CLIENT_ID]$servicePrincipalId"
+#                     echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET]$servicePrincipalKey"
+#                     echo "##vso[task.setvariable variable=ARM_TENANT_ID]$tenantId"
+#                     echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID]$subscriptionId"
+
+#               - task: AzureKeyVault@2
+#                 inputs:
+#                   azureSubscription: 'mdu-conn'
+#                   KeyVaultName: 'kv-Mdu-${{ parameters.environment }}-${{ parameters.location }}-001'
+#                   SecretsFilter: '*'
+
+#               - bash: |
+#                   for secret in $(compgen -A variable); do
+#                     fixed_name=$(echo $secret | tr '-' '_')
+#                     export TF_VAR_${fixed_name}=${!secret}
+#                   done
+#                 displayName: "Map Key Vault secrets"
+
+#               - task: TerraformInstaller@1
+#                 inputs:
+#                   terraformVersion: '1.9.8'
+
+#               - download: current
+#                 artifact: terraform-plan
+
+#               - script: terraform apply -auto-approve tfplan
+#                 displayName: 'Terraform Apply'
+#                 env:
+#                   ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+#                   ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+#                   ARM_TENANT_ID: $(ARM_TENANT_ID)
+#                   ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+#                   TF_VAR_environment: ${{ parameters.environment }}
+#                   TF_VAR_location: ${{ parameters.location }}
+
+# # ========================== DESTROY (Optional Release) ==========================
+# - stage: Terraform_Destroy
+#   displayName: "Terraform Destroy"
+#   dependsOn: Terraform_Apply
+#   condition: succeeded('Terraform_Apply')
+#   jobs:
+#     - deployment: Destroy
+#       environment: 'production'
+#       strategy:
+#         runOnce:
+#           deploy:
+#             steps:
+#               - task: AzureCLI@2
+#                 displayName: "Azure CLI Login (SP Auth)"
+#                 inputs:
+#                   azureSubscription: 'mdu-conn'
+#                   scriptType: 'bash'
+#                   scriptLocation: 'inlineScript'
+#                   inlineScript: |
+#                     echo "Setting ARM_* env variables for Terraform"
+#                     echo "##vso[task.setvariable variable=ARM_CLIENT_ID]$servicePrincipalId"
+#                     echo "##vso[task.setvariable variable=ARM_CLIENT_SECRET]$servicePrincipalKey"
+#                     echo "##vso[task.setvariable variable=ARM_TENANT_ID]$tenantId"
+#                     echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID]$subscriptionId"
+
+#               - task: AzureKeyVault@2
+#                 inputs:
+#                   azureSubscription: 'mdu-conn'
+#                   KeyVaultName: 'kv-Mdu-${{ parameters.environment }}-${{ parameters.location }}-001'
+#                   SecretsFilter: '*'
+
+#               - bash: |
+#                   for secret in $(compgen -A variable); do
+#                     fixed_name=$(echo $secret | tr '-' '_')
+#                     export TF_VAR_${fixed_name}=${!secret}
+#                   done
+
+#               - task: TerraformInstaller@1
+#                 inputs:
+#                   terraformVersion: '1.9.8'
+
+#               - script: terraform destroy -auto-approve
+#                 displayName: 'Terraform Destroy'
+#                 env:
+#                   ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+#                   ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+#                   ARM_TENANT_ID: $(ARM_TENANT_ID)
+#                   ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+#                   TF_VAR_environment: ${{ parameters.environment }}
+#                   TF_VAR_location: ${{ parameters.location }}
 
 
 
