@@ -48,15 +48,14 @@ stages:
 
         # Initialize Terraform backend using Azure Storage
         - task: TerraformTaskV4@4
-          displayName: "Terraform Init"
           inputs:
             provider: 'azurerm'
             command: 'init'
-            backendServiceArm: 'mdu-conn'  # Service connection for Azure auth
-            backendAzureRmOverrideSubscriptionID: '337c0fb8-7f2f-4990-bfd1-828dcc1fff09'
-            backendAzureRmStorageAccountName: $(TF_STORAGE_ACCOUNT)
-            backendAzureRmContainerName: $(TF_CONTAINER_NAME)
-            backendAzureRmKey: $(TF_STATE_FILE)
+            backendServiceArm: 'mdu-conn'
+            backendAzureRmResourceGroupName: 'rg-mdu-dev-001'
+            backendAzureRmStorageAccountName: 'storageaccountmdu001'
+            backendAzureRmContainerName: 'mdu-statefile'
+            backendAzureRmKey: 'terraform.tfstate'
 
 # ========================== VALIDATE ==========================
 - stage: Terraform_Validate
