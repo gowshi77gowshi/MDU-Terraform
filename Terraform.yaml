@@ -1,10 +1,15 @@
-trigger:
+trigger: 
   branches:
     include:
       - main
 
 # ========================== PARAMETERS ==========================
 parameters:
+  - name: project
+    displayName: "Project"
+    type: string
+    default: "Mdu"
+
   - name: environment
     displayName: "Deployment Environment"
     type: string
@@ -22,6 +27,11 @@ parameters:
       - uksouth
       - eastus
       - westeurope
+
+  - name: instance
+    displayName: "Instance Number"
+    type: string
+    default: "001"
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -42,19 +52,21 @@ stages:
       steps:
         - checkout: self
 
-        # 1. Fetch Key Vault Secrets
+        # 1. Fetch Key Vault Secrets (dynamic project, env, location, instance)
         - task: AzureKeyVault@2
           name: FetchSecrets
           inputs:
             azureSubscription: 'mdu-conn'
-            KeyVaultName: 'kv-Mdu-${{ parameters.environment }}-${{ parameters.location }}-001'
+            KeyVaultName: 'kv-${{ parameters.project }}-${{ parameters.environment }}-${{ parameters.location }}-${{ parameters.instance }}'
             SecretsFilter: '*'
             RunAsPreJob: true
 
         # 2. Generate terraform.tfvars dynamically
         - bash: |
-            echo "environment = \"${{ parameters.environment }}\"" > terraform.tfvars
+            
+            echo "environment = \"${{ parameters.environment }}\"" >> terraform.tfvars
             echo "location    = \"${{ parameters.location }}\"" >> terraform.tfvars
+            
 
             # Merge Key Vault secrets
             for secret in $(compgen -A variable); do
@@ -68,13 +80,13 @@ stages:
             cat terraform.tfvars
           displayName: "Generate terraform.tfvars"
 
-        # Install Terraform CLI
+        # 3. Install Terraform CLI
         - task: TerraformInstaller@1
           displayName: "Install Terraform CLI"
           inputs:
             terraformVersion: 'latest'
 
-        # Initialize Terraform backend using Azure Storage
+        # 4. Initialize Terraform backend using Azure Storage
         - task: TerraformTaskV4@4
           displayName: "Terraform Init"
           inputs:
@@ -86,14 +98,14 @@ stages:
             backendAzureRmContainerName: 'mdu-statefile'
             backendAzureRmKey: 'terraform.tfstate'
 
-        # Validate Terraform configuration
+        # 5. Validate Terraform configuration
         - task: TerraformTaskV4@4
           displayName: "Terraform Validate"
           inputs:
             provider: 'azurerm'
             command: 'validate'
 
-        # Run Terraform Plan using merged tfvars
+        # 6. Run Terraform Plan using merged tfvars
         - script: |
             terraform plan \
               -var-file=environments/common.tfvars \
@@ -101,7 +113,7 @@ stages:
               -out=tfplan
           displayName: "Terraform Plan"
 
-        # Publish plan artifact for Apply stage
+        # 7. Publish plan artifact for Apply stage
         - publish: $(System.DefaultWorkingDirectory)/tfplan
           artifact: terraform-plan
           displayName: "Publish Terraform Plan Artifact"
@@ -186,8 +198,6 @@ stages:
                     -var-file=terraform.tfvars \
                     -auto-approve
                 displayName: "Terraform Destroy"
-
-
 
 
 
