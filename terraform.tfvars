@@ -2,7 +2,7 @@
 env         = "dev"
 # location    = "uksouth"
 project     = "Mdunew"
-instance    = "0011"
+instance    = "0"
 
 # Tags
 tags = {
