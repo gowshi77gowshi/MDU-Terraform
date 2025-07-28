@@ -41,6 +41,7 @@ stages:
     - job: Plan
       steps:
         # Install Terraform CLI
+        - checkout: self
         - task: TerraformInstaller@1
           displayName: "Install Terraform CLI"
           inputs:
@@ -95,6 +96,7 @@ stages:
         runOnce:
           deploy:
             steps:
+              - checkout: self
               # Download the approved plan from previous stage
               - download: current
                 artifact: terraform-plan
@@ -112,7 +114,7 @@ stages:
                 inputs:
                   provider: 'azurerm'
                   command: 'apply'
-                  commandOptions: '-auto-approve tfplan'
+                  commandOptions: '-auto-approve $(Pipeline.Workspace)/terraform-plan/tfplan'
                   environmentServiceNameAzureRM: 'mdu-conn'
 
 # ========================== DESTROY (with Approval) ==========================
