@@ -1,8 +1,8 @@
 # General Configuration
-env         = "dev"
+env         = "dev1"
 # location    = "uksouth"
-project     = "Mdu"
-instance    = "001"
+project     = "Mdunew"
+instance    = "0011"
 
 # Tags
 tags = {
