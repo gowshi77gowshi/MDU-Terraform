@@ -101,6 +101,9 @@ stages:
                 displayName: "Download Terraform Plan"
 
               # Apply the Terraform plan (no changes allowed since plan was approved)
+              - task: TerraformInstaller@1
+                inputs:
+                  terraformVersion: 'latest'
               - task: TerraformTaskV4@4
                 displayName: "Terraform Apply"
                 inputs:
