@@ -35,7 +35,7 @@ variables:
 stages:
 
 # ========================== INIT ==========================
-- stage: Terraform_Init
+- stage: Terraform_CI
   displayName: "Terraform Init"
   jobs:
     - job: Init
@@ -56,15 +56,7 @@ stages:
             backendAzureRmStorageAccountName: 'storageaccountmdu001'
             backendAzureRmContainerName: 'mdu-statefile'
             backendAzureRmKey: 'terraform.tfstate'
-
 # ========================== VALIDATE ==========================
-- stage: Terraform_Validate
-  displayName: "Terraform Validate"
-  dependsOn: Terraform_Init
-  jobs:
-    - job: Validate
-      steps:
-        # Validate Terraform syntax and configuration
         - task: TerraformTaskV4@4
           displayName: "Terraform Validate"
           inputs:
@@ -72,12 +64,6 @@ stages:
             command: 'validate'
 
 # ========================== PLAN ==========================
-- stage: Terraform_Plan
-  displayName: "Terraform Plan"
-  dependsOn: Terraform_Validate
-  jobs:
-    - job: Plan
-      steps:
         # Run Terraform Plan with dynamic environment & location variables
         - task: TerraformTaskV4@4
           displayName: "Terraform Plan"
@@ -98,7 +84,7 @@ stages:
 # ========================== APPLY (with Approval) ==========================
 - stage: Terraform_Apply
   displayName: "Terraform Apply"
-  dependsOn: Terraform_Plan
+  dependsOn: Terraform_CI
   condition: succeeded('Terraform_Plan')
   jobs:
     - deployment: Apply
