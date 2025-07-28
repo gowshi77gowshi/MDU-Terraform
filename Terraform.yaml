@@ -5,6 +5,11 @@ trigger:
 
 # ========================== PARAMETERS ==========================
 parameters:
+  - name: project
+    displayName: "Project Name"
+    type: string
+    default: "Mdu"
+
   - name: environment
     displayName: "Deployment Environment"
     type: string
@@ -22,11 +27,6 @@ parameters:
       - uksouth
       - eastus
       - westeurope
-
-  - name: project
-    displayName: "Project Name"
-    type: string
-    default: "Mdu"
 
   - name: instance
     displayName: "Instance Number"
@@ -52,7 +52,7 @@ stages:
       steps:
         - checkout: self
 
-        # 1. Fetch Key Vault Secrets dynamically per environment/location
+        # 1. Fetch Key Vault Secrets
         - task: AzureKeyVault@2
           name: FetchSecrets
           inputs:
@@ -61,22 +61,21 @@ stages:
             SecretsFilter: '*'
             RunAsPreJob: true
 
-        # 2. Generate terraform.tfvars dynamically (merge all sources)
+        # 2. Generate terraform.tfvars dynamically
         - bash: |
-            echo "environment = \"${{ parameters.environment }}\"" > terraform.tfvars
-            echo "location    = \"${{ parameters.location }}\"" >> terraform.tfvars
-            echo "project     = \"${{ parameters.project }}\"" >> terraform.tfvars
-            echo "instance    = \"${{ parameters.instance }}\"" >> terraform.tfvars
+            echo "project     = \"${{ parameters.project }}\""   > terraform.tfvars
+            echo "environment = \"${{ parameters.environment }}\"" >> terraform.tfvars
+            echo "location    = \"${{ parameters.location }}\""    >> terraform.tfvars
+            echo "instance    = \"${{ parameters.instance }}\""    >> terraform.tfvars
 
-            # Merge Key Vault secrets (skip system vars)
+            # Merge Key Vault secrets (exclude system variables)
             for secret in $(compgen -A variable); do
-              if [[ $secret == TF_* || $secret == BUILD_* || $secret == SYSTEM_* || \
-                    $secret == AGENT_* || $secret == IFS || $secret == HOME || $secret == PWD ]]; then
+              if [[ "$secret" =~ ^(TF_|BUILD_|SYSTEM_|AGENT_|COMP_|IFS|PWD|HOME|USER|SHELL|PATH) ]]; then
                 continue
               fi
 
               fixed_name=$(echo "$secret" | tr '-' '_')
-              value=$(echo -n "${!secret}" | sed 's/"/\\"/g')  # escape quotes
+              value=$(echo -n "${!secret}" | tr -d '\r' | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
               echo "${fixed_name} = \"${value}\"" >> terraform.tfvars
             done
 
@@ -202,7 +201,6 @@ stages:
                     -var-file=terraform.tfvars \
                     -auto-approve
                 displayName: "Terraform Destroy"
-
 
 
 
