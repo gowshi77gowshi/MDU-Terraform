@@ -1,5 +1,5 @@
 # General Configuration
-env         = "dev1"
+env         = "dev"
 # location    = "uksouth"
 project     = "Mdunew"
 instance    = "0011"
