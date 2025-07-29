@@ -37,10 +37,19 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-  TF_STORAGE_ACCOUNT: "storageaccountmdu001"
-  TF_CONTAINER_NAME: "mdu-statefile"
-  TF_STATE_FILE: "terraform.tfstate"
-  TF_RESOURCE_GROUP: "rg-mdu-dev-001"
+- group: mdu-terraform   # Reference variable group from Library
+
+- name: TF_STORAGE_ACCOUNT
+  value: "storageaccountmdu001"
+
+- name: TF_CONTAINER_NAME
+  value: "mdu-statefile"
+
+- name: TF_STATE_FILE
+  value: "terraform.tfstate"
+
+- name: TF_RESOURCE_GROUP
+  value: "rg-mdu-dev-001"
 
 stages:
 
